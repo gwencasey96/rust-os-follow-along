@@ -21,9 +21,18 @@
 #![reexport_test_harness_main = "test_main"]
 
 use core::panic::PanicInfo;
+use spin::Mutex;
+use rust_sys_lib::ring_buffer::RingBuffer;
+use rust_sys_lib::bump_allocator::BumpAllocator;
 
 mod vga_buffer;
 mod serial;
+
+/// Keyboard input buffer — holds up to 256 pending keystrokes.
+static KEYBOARD_BUFFER: Mutex<RingBuffer<u8, 256>> = Mutex::new(RingBuffer::new());
+
+/// Early-init memory region for the bump allocator (4 KiB).
+static mut EARLY_HEAP: [u8; 4096] = [0; 4096];
 
 /// This function is called on panic.
 #[cfg(not(test))]
@@ -46,6 +55,24 @@ fn panic(info: &PanicInfo) -> ! {
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
     println!("Hello World{}", "!");
+
+    // Demonstrate the bump allocator over our static early-heap region.
+    let mut early_alloc = unsafe {
+        BumpAllocator::new(EARLY_HEAP.as_mut_ptr() as usize, 4096)
+    };
+    let _block = early_alloc.alloc(64, 8);
+    println!("Early heap: {} bytes used, {} remaining",
+        early_alloc.used(), early_alloc.remaining());
+
+    // Demonstrate the keyboard buffer.
+    {
+        let mut buf = KEYBOARD_BUFFER.lock();
+        buf.push(b'H');
+        buf.push(b'i');
+        if let Some(c) = buf.pop() {
+            println!("Keyboard buffer first byte: {}", c as char);
+        }
+    }
 
     #[cfg(test)]
     test_main();
